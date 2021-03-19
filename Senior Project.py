@@ -209,12 +209,14 @@ class SeniorProject(ProjectGUI.Dialog):
       order_list = cut_orders
       # Take input for table lengths.  for now assume 3 of length 100
       table_lengths = [200, 200, 200]
-      time_to_move = 15
+      time_to_move = 15 * 60
       current_table_iter = 0  # Assume start at first table aka position 0 - assume for now, but could
       #                         take this as an input later if we really wanted to
       # sort order list by due date, priority number, time to cut
       # Basically just use sorting from earlier example code
-      # .....
+      cut_orders.sort(key=lambda x: (x._due_date, -x._priority, -x._tdt), reverse=False)
+      for x in cut_orders:
+          print(x._id, x._due_date, x._priority, x._tdt)
       
       # Divide into sublists - each sublist should have orders of the same due date and priority number, but
       # possibly different cut times
@@ -224,12 +226,16 @@ class SeniorProject(ProjectGUI.Dialog):
       queue = []
       # and new order list to add sorted sublists to
       new_order_list = []
+      order_left_to_process = len(order_list)
       while i < len(order_list):
+          print("Current order index:", i)
           due_date = order_list[i]._due_date
           priority_num = order_list[i]._priority
           sublist = []
           sublist.append([order_list[i], 0])
-          for j in range(i, len(order_list)):
+          i += 1
+          i_other_index = i
+          for j in range(i_other_index, len(order_list)):
               # check each
               if order_list[j]._due_date == due_date and order_list[j]._priority == priority_num:
                   # Append order, along with spot to set as calculated wait / "in-between" time when sorting further down
@@ -238,37 +244,41 @@ class SeniorProject(ProjectGUI.Dialog):
                   # Reformatting any reference to objects in the sublist
                   sublist.append([order_list[j], 0])
                   # del order_list[j]
-                  i += 1  # increment i so we will start from the next batch upon finding
-                  #         orders with different priority or due date
               else:
+                  print("Next order indexing should start at:", i)
                   break
                   # break upon finding orders with different priority or due date
+              i += 1  # increment i so we will start from the next batch upon finding
+              #         orders with different priority or due date
       
           # begin placing orders in queue
           # continue going through sublist to find next order until we have emptied the list
           while sublist:
-              print("we doin sublist OD")
+              print("Parsing through current sublist")
               # Possible improvement: select first order to be spread as one that will take least spreading time
               # (and most cutting time if multiple have the least spread time)
               # Only do so if queue is empty
               if not queue:
                   first_order = None
                   while first_order is None:
-                      print("stuck at line 256")
+                      print("Adding first order to empty queue")
 
                       for x in sublist:
                           if (((first_order is None) or (x[0]._ost < first_order[0]._ost and
-                                                        x[0]._oct > first_order[0]._oct)) and table_lengths[current_table_iter] >= x[0]._order_vars_dict['spr_TCL']) :
+                                                        x[0]._oct > first_order[0]._oct)) and
+                                                        table_lengths[current_table_iter] >= x[0]._order_vars_dict['spr_TCL']):
                               first_order = x
-                          print(first_order, table_lengths[current_table_iter], x[0]._order_vars_dict['spr_TCL'])
-                          print("hit else")
+                      print("First order found")
+                      print(first_order, table_lengths[current_table_iter], first_order[0]._order_vars_dict['spr_TCL'])
                   # add found first order to queue
                   queue.append([first_order[0], first_order[0]._oct, current_table_iter])
                   # remove added order from sublist, add to new order list
                   sublist.remove(first_order)
                   new_order_list.append([first_order[0], current_table_iter])
+                  order_left_to_process -= 1
                   # subtract length of first order from table being spread on
                   table_lengths[current_table_iter] -= first_order[0]._order_vars_dict['spr_TCL']
+                  print("First order found and added to queue, proceeding with scheduling")
               # As of now, above assume any empty table will be large enough to accommodate any one order
       
               next_order = None
@@ -276,31 +286,40 @@ class SeniorProject(ProjectGUI.Dialog):
               min_cutter_downtime = float('inf')
               max_cut_time = 0
               min_spread_wait_time = float('inf')
-              # calculate current table wait times
-              table_cut_wait_times = [0, 0, 0]            # only used for finding cutter down times
-              table_cutter_move_wait_times = [0, 0, 0]    # only used for finding cutter down times
-              for order in queue:
-                  table_cut_wait_times[order[2]] += order[1]
-              # if a table is not the table the cutter is currently at
-              for i in range(0, len(table_lengths)):
-                  if i != current_table_iter:
-                      table_cutter_move_wait_times[i] += time_to_move
+
               for x in sublist:
+                  # calculate current table wait times
+                  table_cut_wait_times = [0, 0, 0]  # only used for finding cutter down times
+                  table_cutter_move_wait_times = [0, 0, 0]  # only used for finding cutter down times
+                  last_table_ind = None
+                  # Calculate cut wait times and cutter move wait times for each table
+                  for order in queue:
+                      if last_table_ind is None:
+                          table_cut_wait_times[order[2]] += order[1]
+                          last_table_ind = order[2]
+                      elif last_table_ind == order[2]:
+                          table_cut_wait_times[order[2]] += order[1]
+                      else:
+                          table_cut_wait_times[order[2]] += order[1]
+                          table_cutter_move_wait_times[order[2]] += time_to_move
+                          last_table_ind = order[2]
+                  # Calculate spread wait times for each table
                   table_spread_wait_times = [0, 0, 0]
-                  table_lengths_copy = [0, 0, 0]
-                  for i in range(0, len(table_lengths)):
-                      table_lengths_copy[i] = table_lengths[i]
-                  for i in range(0, len(table_lengths_copy)):
-                      if table_lengths_copy[i] < x[0]._order_vars_dict['spr_TCL']:
+                  table_lengths_copy = table_lengths
+                  # for i in range(0, len(table_lengths)):
+                  #    table_lengths_copy[i] = table_lengths[i]
+                  for ind in range(0, len(table_lengths_copy)):
+                      if table_lengths_copy[ind] < x[0]._order_vars_dict['spr_TCL']:
                           needed_length = x[0]._order_vars_dict['spr_TCL']
-                          length_avail = table_lengths_copy[i]
+                          length_avail = table_lengths_copy[ind]
                           for y in queue:
                               if length_avail < needed_length:
-                                  if y[2] == i:
-                                      table_spread_wait_times[i] += y[1]
+                                  if y[2] == ind:
+                                      table_spread_wait_times[ind] += y[1]
                                       length_avail += y[0]._order_vars_dict['spr_TCL']
                               else:
                                   break
+
                   # At this point we should now have:
                   # - cut wait times for each table, if any
                   # - cutter moving time for each table
@@ -312,6 +331,8 @@ class SeniorProject(ProjectGUI.Dialog):
                       cur_cutter_downtimes[i] = table_spread_wait_times[i] \
                                                 - table_cut_wait_times[i] \
                                                 + table_cutter_move_wait_times[i]
+                      if cur_cutter_downtimes[i] < 0:
+                          cur_cutter_downtimes[i] = 0
                   # In order of precedence:
                   # 1. Minimize cutter down time
                   # 2. Maximize order cut time (per original priority instructions)
@@ -321,9 +342,8 @@ class SeniorProject(ProjectGUI.Dialog):
                   order_cut_time = x[0]._oct
                   order_min_spread_wait_time = float('inf')
                   table_index = None
+                  # print("Line 326: calculating individual order time values")
                   for i in range(0, len(table_lengths)):
-                      print("stuck at line 321")
-
                       if cur_cutter_downtimes[i] > order_min_cutter_downtime:
                           pass
                       elif cur_cutter_downtimes[i] == order_min_cutter_downtime:
@@ -340,6 +360,7 @@ class SeniorProject(ProjectGUI.Dialog):
                   # after this, we compare to the current values for the next order to be
                   # Again, if this order better meets the requirements for the current next order, we replace the current
                   # With this new one
+                  # print("Line 344: comparing this order to current next order")
                   if order_min_cutter_downtime > min_cutter_downtime:
                       pass
                   elif order_min_cutter_downtime == min_cutter_downtime:
@@ -379,15 +400,23 @@ class SeniorProject(ProjectGUI.Dialog):
       
               # Add to new order list with table index
               new_order_list.append([next_order, next_order_table_index])
+              order_left_to_process -= 1
+              # Subtract length from table order is being added to
+              table_lengths[next_order_table_index] -= next_order._order_vars_dict['spr_TCL']
               # Add to queue
               queue.append([next_order, next_order._oct, next_order_table_index])
               # remove from sublist
               #if next_order in sublist:
               to_remove = []
+              print("Sublist pre-removal:")
+              print(sublist)
               for l in sublist:
                 if l[0] == next_order:
                     to_remove = l
               sublist.remove(to_remove)
+              # print("Line 393: Item removed from sublist")
+              print("Sublist post-removal:")
+              print(sublist)
               # subtract spreading time of this order from oldest order in queue if there is one
               if len(queue) > 1:
                   queue[0] = [queue[0][0], queue[0][1] - next_order._ost, queue[0][2]]
@@ -401,7 +430,7 @@ class SeniorProject(ProjectGUI.Dialog):
                           queue.pop(0)
                       else:
                           while queue[0][1] <= 0:
-                              print("stuck at line 392")
+                              print("subtrtacting leftover time")
 
                               if queue[0][2] == queue[1][2]:
                                   queue[1][1] += queue[0][1]
